@@ -4,7 +4,8 @@
 import { execFile } from 'node:child_process'
 import { busy, Collector, type Agent, type Limit, type Phase, type Snapshot } from './collect.ts'
 import { base, clock, dur, resetIn, tokens } from './fmt.ts'
-import { daemonPid, emit, EVENT_STYLE, send, Watcher } from './notify.ts'
+import { t } from './i18n.ts'
+import { daemonPid, emit, eventLabel, GLYPH, send, Watcher } from './notify.ts'
 import { loadConfig, loadEvents, loadSamples, project, recordUsage, saveConfig, type Config, type Event, type EventKind, type Sample } from './store.ts'
 import { BORDER, box, C, COOL, fit, grad, graph, HEAT, hjoin, meter, render, type Seg } from './term.ts'
 
@@ -44,6 +45,18 @@ const EVENT_FG: Record<EventKind, number> = { done: C.done, idle: C.done, input:
 
 const SPIN = ['◐', '◓', '◑', '◒'] as const
 
+/** AppleScript bodies that open `claude attach <item 1 of argv>` in a new window, per TERM_PROGRAM. */
+const ATTACH_SCRIPT: Record<string, readonly string[]> = {
+  Apple_Terminal: ['tell application "Terminal"', 'do script ("claude attach " & item 1 of argv)', 'activate', 'end tell'],
+  'iTerm.app': [
+    'tell application "iTerm"',
+    'set w to (create window with default profile)',
+    'tell current session of w to write text ("claude attach " & item 1 of argv)',
+    'activate',
+    'end tell',
+  ],
+}
+
 export function activeCount(snap: Snapshot): number {
   return snap.agents.reduce((n, a) => n + (busy(a.phase) ? 1 : 0) + a.subs.length, 0)
 }
@@ -52,14 +65,14 @@ function limitRow(label: string, sub: string, lim: Limit | null, iw: number, now
   const expired = lim !== null && lim.resetsAt <= now
   const pct = lim && !expired ? lim.pct : 0
   const pctText = lim ? `${Math.round(pct)}%` : '--'
-  const reset = !lim ? '' : expired ? '↻ neu' : `↻ ${resetIn(lim.resetsAt, now)}`
+  const reset = !lim ? '' : expired ? t().resetNew : `↻ ${resetIn(lim.resetsAt, now)}`
   const mw = Math.max(4, iw - 4 - 8 - 6 - 12)
   return [
     { t: ` ${label} `, fg: C.title, bold: true },
     { t: fit(sub, 8), fg: C.dim },
     ...meter(pct, mw),
     { t: fit(pctText, 6, 'right'), fg: lim ? grad(HEAT, pct / 100) : C.faint, bold: true },
-    { t: '  ' + fit(reset, 10), fg: C.dim },
+    { t: ' ' + fit(reset, 11), fg: C.dim },
   ]
 }
 
@@ -68,27 +81,28 @@ function usageBox(f: FrameInput, w: number, h: number): string[] {
   const now = snap.at
   const u = snap.usage
   const iw = w - 2
-  const body: Seg[][] = [limitRow('5h', 'session', u?.five ?? null, iw, now), limitRow('7d', 'woche', u?.week ?? null, iw, now)]
+  const s = t()
+  const body: Seg[][] = [limitRow('5h', s.session, u?.five ?? null, iw, now), limitRow('7d', s.week, u?.week ?? null, iw, now)]
   if (!u) {
-    body.push([{ t: ' noch keine werte: kommen mit der nächsten antwort einer session', fg: C.dim }])
-    body.push([{ t: ' (statusline-tap nötig: cctop install)', fg: C.faint }])
+    body.push([{ t: s.noData, fg: C.dim }])
+    body.push([{ t: s.needTap, fg: C.faint }])
   } else {
     const five = u.five && u.five.resetsAt > now ? u.five : null
     const p = five ? project(samples, five.pct, five.resetsAt, now) : null
-    if (!five) body.push([{ t: ' 5h-fenster zurückgesetzt, neue werte mit der nächsten antwort', fg: C.dim }])
-    else if (!p) body.push([{ t: ' tempo: sammle messpunkte …', fg: C.faint }])
+    if (!five) body.push([{ t: s.windowReset, fg: C.dim }])
+    else if (!p) body.push([{ t: s.collecting, fg: C.faint }])
     else {
-      const rate: Seg = { t: ` tempo ${p.rate >= 0 ? '+' : ''}${p.rate.toFixed(1)}%/h`, fg: C.text }
+      const rate: Seg = { t: s.rate(`${p.rate >= 0 ? '+' : ''}${p.rate.toFixed(1)}`), fg: C.text }
       const atReset = five.pct + Math.max(0, p.rate) * ((five.resetsAt - now) / 3600_000)
       body.push([
         rate,
         p.eta !== null && atReset >= 100
-          ? { t: ` → voll in ~${dur(p.eta)}, vor dem reset`, fg: C.failed }
-          : { t: ` → ~${Math.round(atReset)}% beim reset`, fg: atReset >= 85 ? C.input : C.work },
+          ? { t: s.fullIn(dur(p.eta)), fg: C.failed }
+          : { t: s.atReset(Math.round(atReset)), fg: atReset >= 85 ? C.input : C.work },
       ])
     }
     const age = now - u.at
-    body.push([{ t: ` stand vor ${dur(age)}${age > 15 * 60_000 ? ' (alt: keine session aktiv)' : ''} · quelle statusline`, fg: C.faint }])
+    body.push([{ t: s.updated(dur(age), age > 15 * 60_000), fg: C.faint }])
   }
   return box({ title: 'usage', color: BORDER.usage, w, h, body, tr: [{ t: clock(now, true), fg: C.text }] })
 }
@@ -118,8 +132,8 @@ function fleetBox(f: FrameInput, w: number, h: number): string[] {
     body.push([{ t: ' ' }, ...g, { t: fit(axis, 4, 'right'), fg: C.faint }])
   })
   const tr: Seg[] = cfg.notify
-    ? [{ t: 'notify ', fg: C.dim }, { t: '●', fg: C.work }, { t: owner === 'daemon' ? ' daemon' : ' hier', fg: C.dim }]
-    : [{ t: 'notify ', fg: C.dim }, { t: '○ aus', fg: C.failed }]
+    ? [{ t: 'notify ', fg: C.dim }, { t: '●', fg: C.work }, { t: owner === 'daemon' ? ' daemon' : t().notifyHere, fg: C.dim }]
+    : [{ t: 'notify ', fg: C.dim }, { t: t().notifyOff, fg: C.failed }]
   return box({ title: 'fleet', color: BORDER.fleet, w, h, body, tr })
 }
 
@@ -181,7 +195,7 @@ function sessionsBox(f: FrameInput, w: number, h: number): string[] {
         { t: fit(a.subs.length ? String(a.subs.length) : '', cw.sub - 1, 'right'), fg: C.sub, bold: true },
       ],
     })
-    const tasks = a.inFlight > a.subs.length ? ` · ${a.inFlight - a.subs.length} task${a.inFlight - a.subs.length > 1 ? 's' : ''} im hintergrund` : ''
+    const tasks = a.inFlight > a.subs.length ? t().bgTasks(a.inFlight - a.subs.length) : ''
     const note =
       a.phase === 'done' ? a.result ?? a.detail : a.phase === 'idle' ? null : a.detail ? a.detail + tasks : tasks ? tasks.slice(3) : null
     if (note) rows.push({ key: null, segs: [{ t: indent + '└ ', fg: C.line }, { t: note, fg: a.phase === 'input' ? C.input : a.phase === 'failed' ? C.failed : C.dim }] })
@@ -207,7 +221,7 @@ function sessionsBox(f: FrameInput, w: number, h: number): string[] {
   const shown = rows.slice(ui.scroll, ui.scroll + visible)
   const body: Seg[][] = [header, ...shown.map((r) => r.segs)]
   if (!agents.length)
-    body.push([{ t: cfg.hideDone && snap.agents.length ? ' nichts aktiv (d zeigt alle)' : ' keine laufenden Claude-Sessions', fg: C.dim }])
+    body.push([{ t: cfg.hideDone && snap.agents.length ? t().nothingActive : t().noSessions, fg: C.dim }])
 
   const more = rows.length > visible ? ` ${ui.scroll + 1}-${Math.min(rows.length, ui.scroll + visible)}/${rows.length}` : ''
   const hot = (k: string, label: string): Seg[] => [
@@ -221,7 +235,7 @@ function sessionsBox(f: FrameInput, w: number, h: number): string[] {
     h,
     body,
     tr: [{ t: `${agents.length}${agents.length === snap.agents.length ? '' : '/' + snap.agents.length} live${more}`, fg: C.dim }],
-    footer: [hot('↑↓', 'wählen'), hot('⏎', 'attach'), hot('n', 'notify'), hot('d', cfg.hideDone ? 'alle' : 'nur aktive'), hot('t', 'test'), hot('q', 'quit')],
+    footer: [hot('↑↓', t().keySelect), hot('⏎', 'attach'), hot('n', 'notify'), hot('d', cfg.hideDone ? t().keyAll : t().keyActive), hot('t', 'test'), hot('q', 'quit')],
     rowBg: (i) => (i > 0 && shown[i - 1]?.key === ui.sel && ui.sel !== null ? C.selBg : undefined),
   })
 }
@@ -229,17 +243,16 @@ function sessionsBox(f: FrameInput, w: number, h: number): string[] {
 function logBox(f: FrameInput, w: number, h: number): string[] {
   const { events, ui, snap } = f
   const body: Seg[][] = events.slice(0, h - 2).map((e) => {
-    const st = EVENT_STYLE[e.kind]
     const fg = EVENT_FG[e.kind]
     return [
       { t: ` ${clock(e.at)}  `, fg: C.faint },
-      { t: `${st.glyph} `, fg },
-      { t: fit(st.label, 16), fg },
+      { t: `${GLYPH[e.kind]} `, fg },
+      { t: fit(eventLabel(e.kind), 16), fg },
       { t: fit(e.name, 28) + ' ', fg: C.text },
       { t: e.text, fg: C.dim },
     ]
   })
-  if (!body.length) body.push([{ t: ' noch keine meldungen: erscheinen, sobald eine session fertig ist oder auf dich wartet', fg: C.faint }])
+  if (!body.length) body.push([{ t: t().noEvents, fg: C.faint }])
   const flash = ui.flash && ui.flash.until > snap.at ? ui.flash.text : null
   return box({ title: 'log', color: BORDER.log, w, h, body, ...(flash ? { tr: [{ t: flash, fg: C.input }] } : {}) })
 }
@@ -247,7 +260,7 @@ function logBox(f: FrameInput, w: number, h: number): string[] {
 export function frame(f: FrameInput): string[] {
   const { w, h } = f
   if (w < 60 || h < 16) {
-    const msg = render([{ t: ` cctop braucht mindestens 60×16 (jetzt ${w}×${h})`, fg: C.dim }], w)
+    const msg = render([{ t: t().tooSmall(w, h), fg: C.dim }], w)
     return [msg, ...Array.from({ length: h - 1 }, () => render([], w))]
   }
   const side = w >= 96
@@ -304,14 +317,18 @@ export function runTui(): void {
   const attach = (): void => {
     const a = snap.agents.find((x) => x.key === ui.sel)
     if (!a) return
-    if (a.kind !== 'bg' || !a.jobId) return flash('interaktive session: läuft in ihrem eigenen terminal-tab')
+    if (a.kind !== 'bg' || !a.jobId) return flash(t().interactive)
     // jobId is validated as 8 hex chars by the collector, so it is safe inside the shell command.
-    execFile(
-      '/usr/bin/osascript',
-      ['-e', 'on run argv', '-e', 'tell application "Terminal"', '-e', 'do script ("claude attach " & item 1 of argv)', '-e', 'activate', '-e', 'end tell', '-e', 'end run', a.jobId],
-      () => {},
-    )
-    flash(`attach ${a.jobId} → neues terminal-fenster`)
+    const script = ATTACH_SCRIPT[process.env['TERM_PROGRAM'] ?? '']
+    if (script) {
+      execFile('/usr/bin/osascript', ['-e', 'on run argv', ...script.flatMap((l) => ['-e', l]), '-e', 'end run', a.jobId], () => {})
+      return flash(t().attached(a.jobId))
+    }
+    // Other terminals have no scripting API for a new window: hand over the command instead.
+    if (process.platform !== 'darwin') return flash(t().runCmd(a.jobId))
+    const copy = execFile('/usr/bin/pbcopy', () => {})
+    copy.stdin?.end(`claude attach ${a.jobId}`)
+    flash(t().copied(a.jobId))
   }
 
   let restored = false
@@ -334,11 +351,11 @@ export function runTui(): void {
     else if (k === '\r') attach()
     else if (k === 'n') {
       cfg = saveConfig({ notify: !cfg.notify })
-      flash(cfg.notify ? 'notifications an' : 'notifications aus')
+      flash(cfg.notify ? t().notifyOn : t().notifyOffFlash)
     } else if (k === 'd') cfg = saveConfig({ hideDone: !cfg.hideDone })
     else if (k === 't') {
-      send({ at: Date.now(), key: 'test', name: 'cctop', kind: 'test', text: 'So sieht eine Meldung aus, wenn eine Session fertig ist.' }, cfg)
-      flash('test-meldung gesendet')
+      send({ at: Date.now(), key: 'test', name: 'cctop', kind: 'test', text: t().testText }, cfg)
+      flash(t().testSent)
     }
     draw()
   })

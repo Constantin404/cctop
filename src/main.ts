@@ -1,18 +1,10 @@
 import { busy, Collector } from './collect.ts'
 import { base, dur, resetIn, tokens } from './fmt.ts'
+import { setLang, t } from './i18n.ts'
 import { install, uninstall } from './install.ts'
 import { daemon, daemonPid, send } from './notify.ts'
 import { loadConfig, loadEvents, loadSamples } from './store.ts'
 import { frame, runTui, type Ui } from './tui.ts'
-
-const HELP = `cctop: btop für Claude Code
-
-  cctop                 live-ansicht (q beendet)
-  cctop status [--json] einmaliger schnappschuss
-  cctop install         statusline-tap, notifier-daemon, symlink
-  cctop uninstall       alles davon wieder raus
-  cctop test-notify     test-meldung ins notification center
-`
 
 function status(json: boolean): void {
   const snap = new Collector().collect()
@@ -24,10 +16,10 @@ function status(json: boolean): void {
   const u = snap.usage
   const lim = (label: string, l: { pct: number; resetsAt: number } | null | undefined): string =>
     l ? `${label} ${Math.round(l.resetsAt > now ? l.pct : 0)}% (reset ${resetIn(l.resetsAt, now)})` : `${label} --`
-  console.log(`usage  ${lim('5h', u?.five)} · ${lim('7d', u?.week)}${u ? ` · stand vor ${dur(now - u.at)}` : ' · noch keine werte'}`)
+  console.log(`usage  ${lim('5h', u?.five)} · ${lim('7d', u?.week)} · ${u ? dur(now - u.at) : t().statusNoData}`)
   const working = snap.agents.filter((a) => busy(a.phase)).length
   const subs = snap.agents.reduce((n, a) => n + a.subs.length, 0)
-  console.log(`fleet  ${working} arbeiten · ${subs} subagents · ${snap.agents.length} sessions · notify ${daemonPid() ? 'daemon' : 'aus (kein daemon)'}`)
+  console.log(t().statusFleet(working, subs, snap.agents.length, daemonPid() ? 'daemon' : t().statusNoDaemon))
   for (const a of snap.agents) {
     console.log(`  ${a.phase.padEnd(10)} ${a.name.padEnd(32)} ${a.kind.padEnd(3)} ${base(a.cwd).padEnd(22)} ${dur(now - a.since).padStart(6)} ${tokens(a.tokens).padStart(6)}`)
     for (const s of a.subs) console.log(`  ${''.padEnd(10)} ◦ ${s.type} · ${s.desc}`)
@@ -41,6 +33,9 @@ function printFrame(w: number, h: number): void {
   const lines = frame({ snap, ui, cfg: loadConfig(), owner: daemonPid() ? 'daemon' : 'tui', events: loadEvents(), samples: loadSamples(), w, h })
   process.stdout.write(lines.join('\n') + '\n')
 }
+
+const cfg = loadConfig()
+if (cfg.lang) setLang(cfg.lang)
 
 const [cmd, ...rest] = process.argv.slice(2)
 switch (cmd) {
@@ -58,16 +53,16 @@ switch (cmd) {
     daemon()
     break
   case 'install':
-    install()
+    install({ daemon: !rest.includes('--no-daemon') })
     break
   case 'uninstall':
     uninstall()
     break
   case 'test-notify':
-    send({ at: Date.now(), key: 'test', name: 'cctop', kind: 'test', text: 'So sieht eine Meldung aus, wenn eine Session fertig ist.' }, loadConfig())
-    console.log('test-meldung gesendet')
+    send({ at: Date.now(), key: 'test', name: 'cctop', kind: 'test', text: t().testText }, cfg)
+    console.log(t().testSent)
     break
   default:
-    process.stdout.write(HELP)
+    process.stdout.write(t().help)
     process.exit(cmd === 'help' || cmd === '--help' || cmd === '-h' ? 0 : 1)
 }

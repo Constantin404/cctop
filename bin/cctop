@@ -8,4 +8,19 @@ while [ -L "$src" ]; do
   [[ $src != /* ]] && src="$dir/$src"
 done
 root=$(cd -P "$(dirname "$src")/.." && pwd)
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "cctop needs Node.js >= 23.6 (https://nodejs.org)" >&2
+  exit 1
+fi
+ver=$(node -v)
+ver=${ver#v}
+major=${ver%%.*}
+minor=${ver#*.}
+minor=${minor%%.*}
+if (( major < 23 || (major == 23 && minor < 6) )); then
+  echo "cctop needs Node.js >= 23.6 to run TypeScript directly, found v$ver" >&2
+  exit 1
+fi
+
 exec node --disable-warning=ExperimentalWarning "$root/src/main.ts" "$@"

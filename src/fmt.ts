@@ -1,3 +1,5 @@
+import { t } from './i18n.ts'
+
 const two = (n: number): string => String(n).padStart(2, '0')
 
 export function dur(ms: number): string {
@@ -11,19 +13,17 @@ export function dur(ms: number): string {
   return `${d}d${h % 24}h`
 }
 
-export function clock(t: number, seconds = false): string {
-  const d = new Date(t)
+export function clock(at: number, seconds = false): string {
+  const d = new Date(at)
   return `${two(d.getHours())}:${two(d.getMinutes())}${seconds ? ':' + two(d.getSeconds()) : ''}`
 }
-
-const DAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'] as const
 
 /** Short reset label: a countdown inside a day, weekday + time beyond that. */
 export function resetIn(resetsAt: number, now: number): string {
   const left = resetsAt - now
-  if (left <= 0) return 'jetzt'
+  if (left <= 0) return t().now
   if (left < 24 * 3600_000) return dur(left)
-  return `${DAYS[new Date(resetsAt).getDay()] ?? ''} ${clock(resetsAt)}`
+  return `${t().days[new Date(resetsAt).getDay()] ?? ''} ${clock(resetsAt)}`
 }
 
 export function tokens(n: number | null): string {

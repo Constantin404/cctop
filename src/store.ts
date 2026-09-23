@@ -4,6 +4,7 @@ import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync,
 import { dirname } from 'node:path'
 import { isRec, num, readJson, str, type Usage } from './collect.ts'
 import { CONFIG, EVENTS, HOME, USAGE_LOG } from './paths.ts'
+import type { Lang } from './i18n.ts'
 import { clean } from './term.ts'
 
 export interface Config {
@@ -13,9 +14,13 @@ export interface Config {
   soundDone: string
   soundInput: string
   hideDone: boolean
+  /** UI language; null follows the system locale. */
+  lang: Lang | null
+  /** Bundle id of the terminal a notification click brings forward. */
+  terminal: string
 }
 
-const DEFAULTS: Config = { notify: true, minWorkSec: 20, soundDone: 'Glass', soundInput: 'Funk', hideDone: false }
+const DEFAULTS: Config = { notify: true, minWorkSec: 20, soundDone: 'Glass', soundInput: 'Funk', hideDone: false, lang: null, terminal: 'com.apple.Terminal' }
 
 export function loadConfig(): Config {
   const c = readJson(CONFIG)
@@ -26,6 +31,8 @@ export function loadConfig(): Config {
     soundDone: str(c, 'soundDone') ?? DEFAULTS.soundDone,
     soundInput: str(c, 'soundInput') ?? DEFAULTS.soundInput,
     hideDone: typeof c['hideDone'] === 'boolean' ? c['hideDone'] : DEFAULTS.hideDone,
+    lang: c['lang'] === 'de' || c['lang'] === 'en' ? c['lang'] : DEFAULTS.lang,
+    terminal: str(c, 'terminal') ?? DEFAULTS.terminal,
   }
 }
 

@@ -21,7 +21,9 @@ export const STATUSLINE_NEXT = join(HOME, 'statusline-next')
 export const DAEMON_PID = join(HOME, 'daemon.pid')
 export const DAEMON_LOG = join(HOME, 'daemon.log')
 
-export const LABEL = 'com.constantin.cctop'
+export const LABEL = 'cctop.notifier'
+/** Label of the first local install; install and uninstall clean it up. */
+export const LEGACY_LABELS = ['com.constantin.cctop'] as const
 export const PLIST = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
 export const BIN_LINK = join(homedir(), '.local', 'bin', 'cctop')
 // launchd processes may not read ~/Desktop (TCC), so the daemon and the status line tap run

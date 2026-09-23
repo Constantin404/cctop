@@ -7,24 +7,24 @@ import { join } from 'node:path'
 import { alive, busy, Collector, type Agent, type Phase, type Snapshot } from './collect.ts'
 import { base, dur } from './fmt.ts'
 import { DAEMON_PID, HOME, SL } from './paths.ts'
+import { setLang, t } from './i18n.ts'
 import { appendEvent, loadConfig, readText, recordUsage, type Config, type Event, type EventKind } from './store.ts'
 
-export const EVENT_STYLE: Record<EventKind, { glyph: string; label: string }> = {
-  done: { glyph: '✓', label: 'fertig' },
-  idle: { glyph: '✓', label: 'fertig' },
-  input: { glyph: '◆', label: 'wartet auf dich' },
-  failed: { glyph: '✗', label: 'fehlgeschlagen' },
-  test: { glyph: '●', label: 'test' },
+export const GLYPH: Record<EventKind, string> = { done: '✓', idle: '✓', input: '◆', failed: '✗', test: '●' }
+
+export function eventLabel(kind: EventKind): string {
+  const s = t()
+  return kind === 'input' ? s.input : kind === 'failed' ? s.failed : kind === 'test' ? s.test : s.done
 }
 
 function transition(a: Agent, from: Phase, workedMs: number, cfg: Config): Omit<Event, 'at' | 'key' | 'name'> | null {
-  if (a.phase === 'input') return { kind: 'input', text: a.detail ?? 'braucht eine Entscheidung' }
+  if (a.phase === 'input') return { kind: 'input', text: a.detail ?? t().needsDecision }
   if (a.phase === 'failed') return { kind: 'failed', text: a.result ?? a.detail ?? '' }
   if (!busy(from)) return null
   if (a.phase === 'done') return { kind: 'done', text: a.result ?? a.detail ?? base(a.cwd) }
   // Background jobs announce the end of their work through done / input / failed.
   if (a.phase === 'idle' && a.kind === 'cli' && workedMs >= cfg.minWorkSec * 1000)
-    return { kind: 'idle', text: `Antwort bereit · ${base(a.cwd)} · ${dur(workedMs)}` }
+    return { kind: 'idle', text: t().replyReady(base(a.cwd), dur(workedMs)) }
   return null
 }
 
@@ -61,10 +61,9 @@ function terminalNotifier(): string | null {
   return notifierBin
 }
 
-/** Posts a macOS notification. Text goes in as argv, never spliced into a script. */
+/** Posts a desktop notification (macOS, notify-send elsewhere). Text goes in as argv, never spliced into a script. */
 export function send(e: Event, cfg: Config): void {
-  const style = EVENT_STYLE[e.kind]
-  const subtitle = `${style.glyph} ${style.label} · ${e.name}`
+  const subtitle = `${GLYPH[e.kind]} ${eventLabel(e.kind)} · ${e.name}`
   const body = (e.text || ' ').slice(0, 240)
   const sound = e.kind === 'input' ? cfg.soundInput : cfg.soundDone
   const viaScript = (): void => {
@@ -74,12 +73,16 @@ export function send(e: Event, cfg: Config): void {
       () => {},
     )
   }
+  if (process.platform !== 'darwin') {
+    execFile('notify-send', ['--app-name=Claude Code', subtitle, body], () => {})
+    return
+  }
   const tn = terminalNotifier()
   if (!tn) return viaScript()
   // A leading dash or bracket would be read as a flag / group syntax by terminal-notifier.
-  const safe = /^[-[]/.test(body) ? `​${body}` : body
+  const safe = /^[-[]/.test(body) ? `\u200b${body}` : body
   // terminal-notifier focuses Terminal on click; until macOS allows it, osascript takes over.
-  execFile(tn, ['-title', 'Claude Code', '-subtitle', subtitle, '-message', safe, '-sound', sound, '-group', `cctop-${e.key}`, '-activate', 'com.apple.Terminal'], (err) => {
+  execFile(tn, ['-title', 'Claude Code', '-subtitle', subtitle, '-message', safe, '-sound', sound, '-group', `cctop-${e.key}`, '-activate', cfg.terminal], (err) => {
     if (err) viaScript()
   })
 }
@@ -119,10 +122,12 @@ export function daemon(): void {
   mkdirSync(HOME, { recursive: true })
   const other = daemonPid()
   if (other && other !== process.pid) {
-    console.error(`cctop daemon läuft schon (pid ${other})`)
+    console.error(`cctop daemon already running (pid ${other})`)
     process.exit(0)
   }
   writeFileSync(DAEMON_PID, String(process.pid))
+  const lang = loadConfig().lang
+  if (lang) setLang(lang)
   const collector = new Collector()
   const watcher = new Watcher()
   let lastPrune = 0
@@ -148,5 +153,5 @@ export function daemon(): void {
   process.on('SIGINT', stop)
   tick()
   setInterval(tick, 2000)
-  console.error(`${new Date().toISOString()} cctop daemon läuft (pid ${process.pid})`)
+  console.error(`${new Date().toISOString()} cctop daemon running (pid ${process.pid})`)
 }
