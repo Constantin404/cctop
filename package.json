@@ -1,0 +1,21 @@
+{
+  "name": "cctop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "btop-style terminal monitor for Claude Code: live agents, subagents, usage limits and finish notifications",
+  "type": "module",
+  "bin": {
+    "cctop": "bin/cctop"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
+  }
+}

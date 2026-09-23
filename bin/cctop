@@ -1,0 +1,11 @@
+#!/bin/bash
+# Resolves the repo through the ~/.local/bin symlink, then runs the TypeScript entry directly
+# (Node >= 23.6 strips types natively, no build step).
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir=$(cd -P "$(dirname "$src")" && pwd)
+  src=$(readlink "$src")
+  [[ $src != /* ]] && src="$dir/$src"
+done
+root=$(cd -P "$(dirname "$src")/.." && pwd)
+exec node --disable-warning=ExperimentalWarning "$root/src/main.ts" "$@"
