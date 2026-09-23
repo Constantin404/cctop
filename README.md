@@ -31,11 +31,8 @@ brew install node jq terminal-notifier
 
 ## Install
 
-The repository is private, so you need access first: ask the owner to add you as a
-collaborator, accept the invite, and log in once with `gh auth login` (or use an SSH key).
-
 ```sh
-gh repo clone Constantin404/cctop ~/cctop     # or: git clone https://github.com/Constantin404/cctop.git ~/cctop
+git clone https://github.com/Constantin404/cctop.git ~/cctop
 ~/cctop/bin/cctop install
 cctop test-notify                             # macOS asks once whether to allow notifications: allow
 cctop
