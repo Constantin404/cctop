@@ -142,3 +142,7 @@ npm run typecheck
 
 The sources in `src/` run as they are. After changing them, run `./bin/cctop install` so the
 daemon picks them up.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
