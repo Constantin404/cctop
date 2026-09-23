@@ -19,6 +19,7 @@ const en = {
   updated: (d: string, stale: boolean) => ` updated ${d} ago${stale ? ' (stale: no active session)' : ''} · via status line`,
   // fleet box
   notifyHere: ' here',
+  notifyWindow: ' other window',
   notifyOff: '○ off',
   // sessions box
   bgTasks: (n: number) => ` · ${n} background task${n > 1 ? 's' : ''}`,
@@ -107,6 +108,7 @@ const de: typeof en = {
   atReset: (p) => ` → ~${p}% beim reset`,
   updated: (d, stale) => ` stand vor ${d}${stale ? ' (alt: keine session aktiv)' : ''} · quelle statusline`,
   notifyHere: ' hier',
+  notifyWindow: ' anderes fenster',
   notifyOff: '○ aus',
   bgTasks: (n) => ` · ${n} task${n > 1 ? 's' : ''} im hintergrund`,
   nothingActive: ' nichts aktiv (d zeigt alle)',

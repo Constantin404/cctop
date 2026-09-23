@@ -132,6 +132,12 @@ runtime copy. Your data stays in `~/.claude/cctop` until you delete it.
   `launchctl print gui/$(id -u)/cctop.notifier`; its log is `~/.claude/cctop/daemon.log`.
 - **`cctop: command not found`.** Add `~/.local/bin` to your `PATH`, or call
   `~/cctop/bin/cctop` directly.
+- **Claude only answers "safeguards" when you ask it to look at this repo.** That is Claude
+  Code's safety filter on Opus models, not an error in cctop; Claude Code itself says the filter
+  can flag normal work. Out of context, a tool that installs a background agent, edits Claude
+  Code's settings and reads session files can look suspicious. Pick "continue with Sonnet" in the
+  prompt that appears (or `/model sonnet`) and ask again, or rephrase the request. A read-only
+  review with Opus went through in testing.
 
 ## Development
 
