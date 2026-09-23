@@ -123,6 +123,11 @@ const xml = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
 
 function plist(): string {
   const args = [process.execPath, '--disable-warning=ExperimentalWarning', join(RUNTIME, 'src', 'main.ts'), 'daemon']
+  // launchd starts agents with a bare environment; a custom config dir has to be passed on.
+  const dir = process.env['CLAUDE_CONFIG_DIR']
+  const env = dir
+    ? `\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>CLAUDE_CONFIG_DIR</key><string>${xml(dir)}</string>\n  </dict>`
+    : ''
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -137,7 +142,7 @@ ${args.map((a) => `    <string>${xml(a)}</string>`).join('\n')}
   <key>ThrottleInterval</key><integer>10</integer>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>${xml(DAEMON_LOG)}</string>
-  <key>StandardErrorPath</key><string>${xml(DAEMON_LOG)}</string>
+  <key>StandardErrorPath</key><string>${xml(DAEMON_LOG)}</string>${env}
 </dict>
 </plist>
 `
@@ -173,6 +178,9 @@ function startDaemon(): void {
 }
 
 function stopDaemon(): void {
+  // The launchd domain is per user, not per HOME: without our own plist the running agent belongs
+  // to another install (for example a test HOME) and must be left alone.
+  if (!existsSync(PLIST)) return say(false, t().daemonNotRunning)
   const ok = launchctl(['bootout', `${domain()}/${LABEL}`])
   rmSync(PLIST, { force: true })
   say(ok, ok ? t().daemonStopped : t().daemonNotRunning)

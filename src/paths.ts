@@ -20,6 +20,8 @@ export const CONFIG = join(HOME, 'config.json')
 export const STATUSLINE_NEXT = join(HOME, 'statusline-next')
 export const DAEMON_PID = join(HOME, 'daemon.pid')
 export const DAEMON_LOG = join(HOME, 'daemon.log')
+/** Which open cctop window sends notifications while no daemon runs. */
+export const WINDOW_LOCK = join(HOME, 'window.lock')
 
 export const LABEL = 'cctop.notifier'
 /** Label of the first local install; install and uninstall clean it up. */

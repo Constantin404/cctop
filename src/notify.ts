@@ -1,12 +1,12 @@
 // Turns phase changes into finish notifications. Exactly one process owns notifications: the
 // launchd daemon when it runs, otherwise an open cctop window, so nothing fires twice.
 
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { alive, busy, Collector, type Agent, type Phase, type Snapshot } from './collect.ts'
 import { base, dur } from './fmt.ts'
-import { DAEMON_PID, HOME, SL } from './paths.ts'
+import { DAEMON_PID, HOME, SL, WINDOW_LOCK } from './paths.ts'
 import { setLang, t } from './i18n.ts'
 import { appendEvent, loadConfig, readText, recordUsage, type Config, type Event, type EventKind } from './store.ts'
 
@@ -87,10 +87,56 @@ export function send(e: Event, cfg: Config): void {
   })
 }
 
-export function daemonPid(): number | null {
-  const raw = readText(DAEMON_PID)
+const commands = new Map<number, string>()
+
+/** Command line of a live pid, cached; a stale pid file can point at an unrelated process after a reboot. */
+function command(pid: number): string {
+  const hit = commands.get(pid)
+  if (hit !== undefined) return hit
+  let cmd = ''
+  try {
+    cmd = execFileSync('/bin/ps', ['-ww', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim()
+  } catch {
+    // ps exits non-zero for a pid that just went away.
+  }
+  commands.set(pid, cmd)
+  return cmd
+}
+
+/** The pid recorded in `file` if it is alive and runs cctop's main.ts (with `daemon` when asked). */
+function livePid(file: string, daemonOnly: boolean): number | null {
+  const raw = readText(file)
   const pid = raw ? Number.parseInt(raw, 10) : NaN
-  return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : null
+  if (!Number.isInteger(pid) || pid <= 0) return null
+  if (pid === process.pid) return pid
+  if (!alive(pid)) {
+    commands.delete(pid)
+    return null
+  }
+  const cmd = command(pid)
+  // Any clone location works, so match the entry file rather than the folder name.
+  return /\/src\/main\.ts( |$)/.test(cmd) && (!daemonOnly || /\/src\/main\.ts daemon$/.test(cmd)) ? pid : null
+}
+
+export function daemonPid(): number | null {
+  return livePid(DAEMON_PID, true)
+}
+
+/**
+ * True when this window should send notifications: no daemon runs and no other open window
+ * already holds the lock. Without the lock two windows would each notify once.
+ */
+export function claimWindow(): boolean {
+  const holder = livePid(WINDOW_LOCK, false)
+  if (holder === process.pid) return true
+  if (holder !== null) return false
+  mkdirSync(HOME, { recursive: true })
+  writeFileSync(WINDOW_LOCK, String(process.pid))
+  return true
+}
+
+export function releaseWindow(): void {
+  if (readText(WINDOW_LOCK) === String(process.pid)) rmSync(WINDOW_LOCK, { force: true })
 }
 
 export function emit(events: readonly Event[], cfg: Config): void {

@@ -5,11 +5,11 @@ import { execFile } from 'node:child_process'
 import { busy, Collector, type Agent, type Limit, type Phase, type Snapshot } from './collect.ts'
 import { base, clock, dur, resetIn, tokens } from './fmt.ts'
 import { t } from './i18n.ts'
-import { daemonPid, emit, eventLabel, GLYPH, send, Watcher } from './notify.ts'
+import { claimWindow, daemonPid, emit, eventLabel, GLYPH, releaseWindow, send, Watcher } from './notify.ts'
 import { loadConfig, loadEvents, loadSamples, project, recordUsage, saveConfig, type Config, type Event, type EventKind, type Sample } from './store.ts'
 import { BORDER, box, C, COOL, fit, grad, graph, HEAT, hjoin, meter, render, type Seg } from './term.ts'
 
-export type Owner = 'daemon' | 'tui'
+export type Owner = 'daemon' | 'tui' | 'window'
 
 export interface Ui {
   sel: string | null
@@ -132,7 +132,7 @@ function fleetBox(f: FrameInput, w: number, h: number): string[] {
     body.push([{ t: ' ' }, ...g, { t: fit(axis, 4, 'right'), fg: C.faint }])
   })
   const tr: Seg[] = cfg.notify
-    ? [{ t: 'notify ', fg: C.dim }, { t: '●', fg: C.work }, { t: owner === 'daemon' ? ' daemon' : t().notifyHere, fg: C.dim }]
+    ? [{ t: 'notify ', fg: C.dim }, { t: '●', fg: C.work }, { t: owner === 'daemon' ? ' daemon' : owner === 'window' ? t().notifyWindow : t().notifyHere, fg: C.dim }]
     : [{ t: 'notify ', fg: C.dim }, { t: t().notifyOff, fg: C.failed }]
   return box({ title: 'fleet', color: BORDER.fleet, w, h, body, tr })
 }
@@ -280,7 +280,8 @@ export function runTui(): void {
   const ui: Ui = { sel: null, scroll: 0, flash: null, hist: [], spin: 0, order: [] }
   let cfg = loadConfig()
   let snap = collector.collect()
-  let owner: Owner = daemonPid() ? 'daemon' : 'tui'
+  const whoNotifies = (): Owner => (daemonPid() ? 'daemon' : claimWindow() ? 'tui' : 'window')
+  let owner: Owner = whoNotifies()
   let lastSample = 0
   watcher.step(snap, cfg)
 
@@ -294,7 +295,7 @@ export function runTui(): void {
   const tick = (): void => {
     cfg = loadConfig()
     snap = collector.collect()
-    owner = daemonPid() ? 'daemon' : 'tui'
+    owner = whoNotifies()
     const events = watcher.step(snap, cfg)
     if (owner === 'tui') {
       emit(events, cfg)
@@ -335,6 +336,7 @@ export function runTui(): void {
   const restore = (): void => {
     if (restored) return
     restored = true
+    releaseWindow()
     out.write('\x1b[?7h\x1b[?25h\x1b[?1049l')
     if (inp.isTTY) inp.setRawMode(false)
   }

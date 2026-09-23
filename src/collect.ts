@@ -244,6 +244,7 @@ export class Collector {
   private subDirs = new Map<string, { dir: string | null; checked: number }>()
   private subFiles = new Map<string, SubFile>()
   private metas = new Map<string, { type: string; desc: string }>()
+  private touched = new Set<string>()
 
   collect(now = Date.now()): Snapshot {
     const { usage, stats } = readStatusline()
@@ -259,6 +260,12 @@ export class Collector {
     }
     const live = new Set(agents.map((a) => a.key))
     for (const k of this.seen.keys()) if (!live.has(k)) this.seen.delete(k)
+    // The daemon runs for weeks: forget sessions and subagent files that are gone.
+    const sessions = new Set(agents.map((a) => a.sessionId))
+    for (const k of this.subDirs.keys()) if (!sessions.has(k)) this.subDirs.delete(k)
+    for (const k of this.subFiles.keys()) if (!this.touched.has(k)) this.subFiles.delete(k)
+    for (const k of this.metas.keys()) if (!this.touched.has(k.replace(/\.meta\.json$/, '.jsonl'))) this.metas.delete(k)
+    this.touched.clear()
     agents.sort((x, y) => ORDER[x.phase] - ORDER[y.phase] || (busy(x.phase) ? x.startedAt - y.startedAt : y.since - x.since))
     return { at: now, agents, usage }
   }
@@ -362,6 +369,7 @@ export class Collector {
       } catch {
         continue
       }
+      this.touched.add(p)
       const quiet = now - st.mtimeMs
       // A transcript that stopped moving long ago belongs to a subagent that was killed or lost.
       if (quiet > 30 * 60_000 || (quiet > 10 * 60_000 && !busy(parent))) continue
